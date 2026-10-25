@@ -1,0 +1,27 @@
+# Node.js dependencies
+node_modules/
+
+# Reference genome and index files
+hg38.fa*
+hg38.dict
+
+# Raw sequencing files
+OPA155*
+
+# VEP cache
+.vep/
+
+# Local hidden directories
+.npm/
+.java/
+.ngs-pipeline/
+.bash_history
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+picard*
+
+gatk-4.5.0.0/
+bbmap

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>NGS Report — NA12878</title>
+<style>
+:root { --primary:#1a3a5c; --accent:#2980b9; --light:#f0f4f8; --border:#d5dbe3; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:'Segoe UI',Arial,sans-serif; font-size:13px; color:#2c3e50; background:#e8edf2; }
+.page { max-width:990px; margin:0 auto; background:white; box-shadow:0 0 24px rgba(0,0,0,.15); }
+.header { background:var(--primary); color:white; padding:22px 32px 18px; }
+.header h1 { font-size:1.55em; letter-spacing:0.5px; }
+.header .subtitle { font-size:0.88em; opacity:.7; margin-top:4px; }
+.header-meta { display:flex; gap:36px; margin-top:16px; flex-wrap:wrap; }
+.header-meta div { font-size:0.82em; }
+.header-meta strong { display:block; color:#aed6f1; font-size:0.8em; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px; }
+.toc { background:#f7f9fc; padding:14px 32px; border-bottom:2px solid var(--border); }
+.toc h3 { font-size:0.85em; color:var(--primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+.toc ol { padding-left:20px; }
+.toc li { margin:3px 0; }
+.toc a { color:var(--accent); text-decoration:none; font-size:0.88em; }
+.toc a:hover { text-decoration:underline; }
+.section { padding:20px 32px; border-bottom:1px solid var(--border); }
+.section:last-child { border-bottom:none; }
+.section-title { font-size:1em; font-weight:700; color:var(--primary); text-transform:uppercase;
+                 letter-spacing:0.8px; border-left:4px solid var(--accent);
+                 padding-left:10px; margin-bottom:14px; }
+.qc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(155px,1fr)); gap:10px; }
+.qc-card { background:var(--light); border-radius:6px; padding:9px 13px; border-top:3px solid var(--accent); }
+.qc-card .label { font-size:0.73em; color:#7f8c8d; text-transform:uppercase; letter-spacing:.3px; }
+.qc-card .value { font-size:1.1em; font-weight:700; color:var(--primary); margin-top:2px; }
+.badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:0.8em; font-weight:600; color:white; white-space:nowrap; }
+.badge-pass { background:#d5f5e3 !important; color:#1e8449 !important; }
+.badge-fail { background:#fadbd8 !important; color:#922b21 !important; }
+table { width:100%; border-collapse:collapse; font-size:0.87em; margin-top:8px; }
+th { background:var(--primary); color:white; padding:8px 10px; text-align:left; font-weight:600; font-size:0.85em; }
+td { padding:7px 10px; border-bottom:1px solid #eaecef; vertical-align:top; }
+tr:nth-child(even) td { background:#fafbfc; }
+tr:hover td { background:#f0f4f8; }
+.mono { font-family:'Courier New',monospace; font-size:0.93em; }
+.variant-block { margin-bottom:18px; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+.variant-block-title { background:#eaf0f7; color:var(--primary); font-weight:700; padding:8px 14px; font-size:0.93em; border-bottom:1px solid var(--border); }
+.variant-block table th { background:#2c4f72; }
+.alert-legend { margin-bottom:14px; font-size:0.88em; display:flex; gap:20px; flex-wrap:wrap; }
+.alert-entry { padding:12px 16px; border-bottom:1px solid #eee; }
+.alert-entry:last-child { border-bottom:none; }
+.alert-header { display:flex; align-items:center; gap:6px; margin-bottom:6px; flex-wrap:wrap; }
+.alert-meta { display:flex; gap:20px; flex-wrap:wrap; font-size:0.84em; color:#555; margin-bottom:6px; }
+.alert-statement { font-size:0.87em; color:#2c3e50; line-height:1.55; margin-bottom:4px; }
+.alert-ref { font-size:0.8em; color:#7f8c8d; }
+.desc-subsection { margin:10px 14px; }
+.desc-subsection h4 { color:var(--primary); font-size:0.9em; margin-bottom:4px; }
+.desc-subsection p { font-size:0.87em; line-height:1.6; color:#444; }
+.method-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.method-box { background:var(--light); border-radius:6px; padding:12px 16px; }
+.method-box h4 { color:var(--primary); margin-bottom:6px; font-size:0.88em; }
+.method-box p { color:#555; line-height:1.5; font-size:0.84em; }
+.gene-list { font-family:monospace; font-size:0.82em; color:#2c3e50; line-height:1.7; }
+.fusion-negative { background:#eafaf1; border:1px solid #a9dfbf; border-radius:6px; padding:12px 18px; color:#1e8449; font-size:0.92em; }
+.empty { color:#999; font-style:italic; font-size:0.9em; }
+.note { font-size:0.82em; color:#7f8c8d; margin-bottom:8px; line-height:1.5; }
+.footer { background:var(--primary); color:#aab7c4; font-size:0.78em; padding:14px 32px; text-align:center; }
+.finding-subtitle { font-size:0.97em; color:#2c3e50; margin-bottom:8px; }
+.finding-table { width:100%; border-collapse:collapse; margin-bottom:10px; }
+.finding-table th { background:var(--primary); color:#fff; padding:6px 10px; font-size:0.82em; text-align:left; }
+.finding-table td { padding:5px 10px; border-bottom:1px solid #eee; font-size:0.88em; vertical-align:middle; }
+.finding-table tr:nth-child(even) td { background:#f8f9fa; }
+.finding-detected { font-style:italic; font-weight:600; color:#1a5276; }
+.finding-none { color:#999; }
+.other-findings-block { margin-top:10px; padding:10px 14px; background:#f4f6f7; border-left:3px solid #7f8c8d; border-radius:4px; }
+.other-findings-block strong { display:block; margin-bottom:6px; color:#2c3e50; }
+.other-finding-item { display:inline-block; font-style:italic; font-size:0.88em; color:#34495e; margin-right:18px; margin-top:2px; }
+.desc-gene-name { font-size:0.88em; color:#7f8c8d; font-style:italic; margin:-6px 0 10px 0; }
+.desc-label { font-weight:700; color:#1a5276; }
+.desc-subsection { margin-bottom:10px; }
+.desc-subsection p { margin:4px 0; line-height:1.65; font-size:0.9em; }
+@media print { body { background:white; } .page { box-shadow:none; max-width:100%; } .toc { display:none; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="header">
+  <h1>Next-Generation Sequencing Report</h1>
+  <div class="subtitle">Comprehensive Genomic Profiling &bull; Oncomine Precision Assay</div>
+  <div class="header-meta">
+    <div><strong>Sample / Lab ID</strong>NA12878</div>
+    <div><strong>Analysis Name</strong>N/A</div>
+    <div><strong>Disease Type</strong>N/A</div>
+    <div><strong>Reference Genome</strong>file:///illumina/development/Isis/Genomes/Homo_sapiens/UCSC/hg19/Sequence/WholeGenomeFASTA/genome.fa</div>
+    <div><strong>Report Date</strong>08 May 2026</div>
+    <div><strong>File Date</strong>N/A</div>
+  </div>
+</div>
+
+<div class="toc">
+  <h3>Table of Contents</h3>
+  <ol>
+    <li><a href="#s-qc">Quality Control Summary</a></li>
+    <li><a href="#s-relevant">Relevant Findings</a></li>
+    <li><a href="#s-key">Key Variants — SNV / Indel</a></li>
+    <li><a href="#s-nonkey">Non-Key / Low-AF Variants</a></li>
+    <li><a href="#s-clinical">Clinical Relevance of Detected Variants</a></li>
+    <li><a href="#s-therapy">Relevant Therapy Summary</a></li>
+    <li><a href="#s-alerts">Alerts Informed by Public Data Sources</a></li>
+    <li><a href="#s-trials">Clinical Trials Summary</a></li>
+    <li><a href="#s-description">Variant Description</a></li>
+    <li><a href="#s-genes">Genes Assayed</a></li>
+    <li><a href="#s-method">Methodology</a></li>
+  </ol>
+</div>
+
+<div class="section" id="s-qc">
+  <div class="section-title">Quality Control Summary</div>
+  
+<div class="qc-grid">
+  <div class="qc-card"><div class="label">Total Reads</div><div class="value">N/A</div></div>
+  <div class="qc-card"><div class="label">Aligned Reads</div><div class="value">N/A%</div></div>
+  <div class="qc-card"><div class="label">Median Reads/Amplicon</div><div class="value">0</div></div>
+  <div class="qc-card"><div class="label">Non-Zero Amplicons</div><div class="value">N/A%</div></div>
+  <div class="qc-card"><div class="label">MAPD</div><div class="value">N/A</div></div>
+  <div class="qc-card"><div class="label">Tumor Cellularity</div><div class="value">N/A</div></div>
+  <div class="qc-card"><div class="label">Gender</div><div class="value">N/A</div></div>
+  <div class="qc-card"><div class="label">File Date</div><div class="value">N/A</div></div>
+  <div class="qc-card"><div class="label">Reference</div><div class="value">file:///illumina/development/Isis/Genomes/Homo_sapiens/UCSC/hg19/Sequence/WholeGenomeFASTA/genome.fa</div></div>
+  <div class="qc-card"><div class="label">Disease Type</div><div class="value">N/A</div></div>
+</div>
+</div>
+
+<div class="section" id="s-relevant">
+  <div class="section-title">Relevant Findings</div>
+  <p class='empty'>No key variants detected.</p>
+</div>
+
+<div class="section" id="s-key">
+  <div class="section-title">Key Variants — SNV / Indel <span style='font-size:0.75em;font-weight:400;color:#aaa;'>AF &ge; 0.5%</span></div>
+  <p class='empty'>No PASS variants detected above allele-frequency threshold.</p>
+</div>
+
+<div class="section" id="s-nonkey">
+  <div class="section-title">Non-Key / Low Allele-Frequency Variants</div>
+  <p class='empty'>No additional PASS variants detected.</p>
+</div>
+
+<div class="section" id="s-clinical">
+  <div class="section-title">Clinical Relevance of Detected Variants</div>
+  <p class='empty'>No clinical data found for key variants.</p>
+</div>
+
+<div class="section" id="s-therapy">
+  <div class="section-title">Relevant Therapy Summary</div>
+  <p class='empty'>No curated therapy data found in CIViC for key variants.</p>
+</div>
+
+<div class="section" id="s-alerts">
+  <div class="section-title">Alerts Informed by Public Data Sources</div>
+  <p class='empty'>No resistance alerts found for key variants.</p>
+</div>
+
+<div class="section" id="s-trials">
+  <div class="section-title">Clinical Trials Summary</div>
+  <p class='empty'>No clinical trials found from ClinicalTrials.gov for key variants.</p>
+</div>
+
+<div class="section" id="s-description">
+  <div class="section-title">Variant Description</div>
+  <p class='empty'>No variant description available from CIViC for key variants.</p>
+</div>
+
+<div class="section" id="s-genes">
+  <div class="section-title">Genes Assayed</div>
+  
+<div class="method-grid">
+  <div class="method-box">
+    <h4>DNA Sequence Variants (45 genes)</h4>
+    <p class="gene-list">AKT1, AKT2, AKT3, ALK, AR, ARAF, BRAF, CDK4, CDKN2A, CHEK2, CTNNB1, EGFR, ERBB2, ERBB3, ERBB4, ESR1, FGFR1, FGFR2, FGFR3, FGFR4, FLT3, GNA11, GNAQ, GNAS, HRAS, IDH1, IDH2, KIT, KRAS, MAP2K1, MAP2K2, MET, MTOR, NRAS, NTRK1, NTRK2, NTRK3, PDGFRA, PIK3CA, PTEN, RAF1, RET, ROS1, SMO, TP53</p>
+  </div>
+  <div class="method-box">
+    <h4>Copy Number Variations (14 genes)</h4>
+    <p class="gene-list">ALK, AR, CD274, CDKN2A, EGFR, ERBB2, ERBB3, FGFR1, FGFR2, FGFR3, KRAS, MET, PIK3CA, PTEN</p>
+  </div>
+  <div class="method-box" style="grid-column:1/-1;">
+    <h4>Fusions (18 genes)</h4>
+    <p class="gene-list">ALK, AR, BRAF, EGFR, ESR1, FGFR1, FGFR2, FGFR3, MET, NRG1, NTRK1, NTRK2, NTRK3, NUTM1, RET, ROS1, RSPO2, RSPO3</p>
+  </div>
+</div>
+</div>
+
+<div class="section" id="s-method">
+  <div class="section-title">Methodology</div>
+  
+<div class="method-grid">
+  <div class="method-box">
+    <h4>Assay Platform</h4>
+    <p>Oncomine Precision Assay (NGS) using Ion Torrent technology.
+       Variant calling by Torrent Variant Caller (TVC) vN/A.
+       Ion Reporter Software vN/A.</p>
+  </div>
+  <div class="method-box">
+    <h4>Annotation Databases</h4>
+    <p>N/A</p>
+  </div>
+  <div class="method-box">
+    <h4>Workflow</h4>
+    <p>N/A (vN/A)</p>
+  </div>
+  <div class="method-box">
+    <h4>Oncomine Variant Annotation Tool</h4>
+    <p>Version N/A<br>
+       Ruleset: N/A</p>
+  </div>
+  <div class="method-box" style="grid-column:1/-1;">
+    <h4>Clinical Data Sources</h4>
+    <p><strong>CIViC</strong> (civicdb.org) — Griffith et al. Nat Genet 2017. GraphQL API, accepted evidence.<br>
+       <strong>ClinicalTrials.gov</strong> v2 API — recruiting and active interventional trials.<br>
+       <strong>MyVariant.info</strong> — aggregated ClinVar / COSMIC / dbNSFP annotations.<br>
+       API responses cached 7 days in <em>vcf_report_cache.json</em>.</p>
+  </div>
+  <div class="method-box" style="grid-column:1/-1;">
+    <h4>Limitations &amp; Disclaimer</h4>
+    <p>This report is for research use only. Findings should be correlated with clinical presentation
+       and confirmed by orthogonal methods before clinical action. Coverage of clinical annotations may
+       not be exhaustive. The assay does not detect large structural variants, deep intronic variants,
+       or gross chromosomal abnormalities.</p>
+  </div>
+</div>
+</div>
+
+<div class="footer">
+  Generated by vcf_report_generator.py &bull; 2026-05-08 23:08 &bull;
+  VCF: test.vcf &bull; Sample: NA12878 &bull; Reference: file:///illumina/development/Isis/Genomes/Homo_sapiens/UCSC/hg19/Sequence/WholeGenomeFASTA/genome.fa<br>
+  Clinical data: CIViC &bull; ClinicalTrials.gov &bull; MyVariant.info.
+  This report is for research use only. Not for clinical diagnostic use without independent validation.
+</div>
+</div>
+</body>
+</html>
