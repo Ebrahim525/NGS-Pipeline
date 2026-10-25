@@ -1,7 +1,11 @@
 # Node.js dependencies
 node_modules/
 
+<<<<<<< HEAD
 # Reference genome and index files
+=======
+# Reference genome - keep FASTA, ignore index files
+>>>>>>> 76dacba (First commit)
 hg38.fa*
 hg38.dict
 
@@ -21,6 +25,11 @@ OPA155*
 .DS_Store
 Thumbs.db
 
+<<<<<<< HEAD
+=======
+.vscode
+
+>>>>>>> 76dacba (First commit)
 picard*
 
 gatk-4.5.0.0/
