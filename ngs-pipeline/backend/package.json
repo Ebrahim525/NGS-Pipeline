@@ -5,12 +5,16 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "mcp": "node mcp-server.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.7",
+    "@gmod/vcf": "^7.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
     "archiver": "^7.0.1",
     "cors": "^2.8.5",
-    "express": "^4.21.2"
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "zod": "^4.6.7"
   }
 }

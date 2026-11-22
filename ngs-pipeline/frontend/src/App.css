@@ -258,6 +258,25 @@
   flex-wrap: wrap;
 }
 
+.stage-parameters {
+  min-inline-size: 0;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.stage-parameters legend {
+  padding: 0 0.35rem;
+  font-weight: 500;
+}
+
+.stage-parameters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 0 1rem;
+}
+
 .qc-run {
   font: inherit;
   font-size: 0.9375rem;

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRootDir } from '../RootDirContext.jsx'
 import { FilePickerModal } from './FilePickerModal.jsx'
+import { StageParameters } from './StageParameters.jsx'
+import { useStageParameters } from './useStageParameters.js'
 
 export function DownstreamAnalysisPanel() {
+  const { parameters, args, fieldProps } = useStageParameters('civic-report')
   const { rootDir, selectedPatient: selectedFolder, setSelectedPatient: setSelectedFolder } = useRootDir()
   const [inputVcf, setInputVcf] = useState('')
   const [outputHtml, setOutputHtml] = useState('')
@@ -206,8 +209,8 @@ export function DownstreamAnalysisPanel() {
   const commandPreview = useMemo(() => {
     const i = inputVcf.trim() || '/path/to/input.vcf'
     const o = outputHtml.trim() || (inputVcf.trim() ? getOutputHtmlFor(inputVcf.trim()) : '/path/to/ngs-report/annotated_variants_report.html')
-    return `python vcf_report_generator.py "${i}" --output "${o}"`
-  }, [inputVcf, outputHtml, getOutputHtmlFor])
+    return [`python vcf_report_generator.py "${i}" --output "${o}"`, ...(args?.main ?? [])].join(' ')
+  }, [inputVcf, outputHtml, getOutputHtmlFor, args])
 
   const runReport = useCallback(async () => {
     setError(null)
@@ -229,6 +232,7 @@ export function DownstreamAnalysisPanel() {
           outputHtml: o,
           scriptPath: scriptPath.trim() || undefined,
           dbDir: dbDir.trim() || undefined,
+          parameters,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -250,7 +254,7 @@ export function DownstreamAnalysisPanel() {
     } finally {
       setLoading(false)
     }
-  }, [dbDir, inputVcf, outputHtml, scriptPath])
+  }, [dbDir, inputVcf, outputHtml, scriptPath, getOutputHtmlFor, parameters])
 
   return (
     <div className="qc-panel">
@@ -418,12 +422,13 @@ export function DownstreamAnalysisPanel() {
       </div>
 
 
+      <StageParameters {...fieldProps} disabled={loading} />
       <div className="qc-actions">
         <button
           type="button"
           className="qc-run"
           onClick={runReport}
-          disabled={loading || uploading || !inputVcf.trim() || !outputHtml.trim()}
+          disabled={loading || uploading || !parameters || !inputVcf.trim() || !outputHtml.trim()}
         >
           {loading ? 'Generating report…' : 'Generate clinical report'}
         </button>
@@ -438,11 +443,12 @@ export function DownstreamAnalysisPanel() {
         )}
       </div>
 
-      <section className="qc-server-help">
-        <h3 className="qc-help-title">Command preview</h3>
-        <pre className="qc-cmd">{commandPreview}</pre>
-
-      </section>
+      {args && (
+        <section className="qc-server-help">
+          <h3 className="qc-help-title">Command preview</h3>
+          <pre className="qc-cmd">{commandPreview}</pre>
+        </section>
+      )}
 
       {log && (
         <section className="qc-server-help">

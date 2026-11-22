@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRootDir } from '../RootDirContext.jsx'
 import { FilePickerModal } from './FilePickerModal.jsx'
+import { StageParameters } from './StageParameters.jsx'
+import { useStageParameters } from './useStageParameters.js'
 
 /** Matches a typical WSL home layout: cloned bwa build under ~/bwa/bwa */
 // const defaultBwa = '~/bwa/bwa'
@@ -25,6 +27,7 @@ function toWslPath(winPath) {
 }
 
 export function AlignmentPanel() {
+  const { parameters, args, fieldProps } = useStageParameters('alignment')
   const { rootDir, selectedPatient: selectedFolder, setSelectedPatient: setSelectedFolder } = useRootDir()
   const [bwaCmd, setBwaCmd] = useState(defaultBwa)
   const [refPath, setRefPath] = useState(DEFAULT_REF_PATH)
@@ -203,21 +206,16 @@ export function AlignmentPanel() {
   }, [bwaCmd, refPath])
 
   const generatedAlignment = useMemo(() => {
-    const f = fastqPath.trim()
-    const o = getOutBamPreview()
+    const f = fastqPath.trim() || '~/cleaned.fastq'
+    const o = getOutBamPreview() || '~/aligned_sorted.bam'
     const b = bwaCmd.trim() || 'bwa'
     const r = refPath.trim() || DEFAULT_REF_PATH
-    if (!f || !o) {
-      return [
-        `${b} mem ${r} ~/cleaned.fastq \\`,
-        '| samtools view -Sb - \\',
-        '| samtools sort -o ~/aligned_sorted.bam',
-      ].join('\n')
-    }
-    return [`${b} mem ${r} ${f} \\`, '| samtools view -Sb - \\', `| samtools sort -o ${o}`].join(
-      '\n',
-    )
-  }, [bwaCmd, fastqPath, getOutBamPreview, refPath])
+    return [
+      [b, 'mem', ...(args?.bwa ?? []), r, f].join(' ') + ' \\',
+      '| samtools view -Sb - \\',
+      ['| samtools sort', ...(args?.sort ?? []), '-o', o].join(' '),
+    ].join('\n')
+  }, [bwaCmd, fastqPath, getOutBamPreview, refPath, args])
 
   const indexBamCmd = useMemo(() => {
     const p = indexBamPath.trim() || getOutBamPreview()
@@ -249,6 +247,7 @@ export function AlignmentPanel() {
           refPath: refPath.trim() || DEFAULT_REF_PATH,
           fastqPath: fq,
           patientDir,
+          parameters,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -264,7 +263,7 @@ export function AlignmentPanel() {
     } finally {
       setAlignLoading(false)
     }
-  }, [bwaCmd, fastqPath, getPatientDir, refPath])
+  }, [bwaCmd, fastqPath, getPatientDir, refPath, parameters])
 
   const runIndexBam = useCallback(async () => {
     const bam = indexBamPath.trim() || getOutBamPreview()
@@ -296,7 +295,7 @@ export function AlignmentPanel() {
     if (o) setIndexBamPath(o)
   }, [getOutBamPreview])
 
-  const canRunAlign = Boolean(fastqPath.trim() && selectedFolder) && !alignLoading
+  const canRunAlign = Boolean(fastqPath.trim() && selectedFolder && parameters) && !alignLoading
   const canRunIndex = Boolean((indexBamPath.trim() || getOutBamPreview()) && !indexLoading)
 
   return (
@@ -548,7 +547,8 @@ export function AlignmentPanel() {
           />
         </div>
 
-        <pre className="qc-cmd align-pre">{generatedAlignment}</pre>
+        <StageParameters {...fieldProps} disabled={alignLoading} />
+        {args && <pre className="qc-cmd align-pre">{generatedAlignment}</pre>}
 
         <div className="qc-actions align-actions-row">
           <button
@@ -563,7 +563,7 @@ export function AlignmentPanel() {
             type="button"
             className="qc-run"
             onClick={() => copyToClipboard(generatedAlignment, setCopied)}
-            disabled={alignLoading}
+            disabled={alignLoading || !parameters}
           >
             Copy command
           </button>

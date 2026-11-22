@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRootDir } from '../RootDirContext.jsx'
 import { FilePickerModal } from './FilePickerModal.jsx'
+import { StageParameters } from './StageParameters.jsx'
+import { useStageParameters } from './useStageParameters.js'
 
 function copyToClipboard(text, setCopied) {
   navigator.clipboard.writeText(text).then(() => {
@@ -20,6 +22,7 @@ function toWslPath(winPath) {
 }
 
 export function PostAlignmentPanel() {
+  const { parameters, args, fieldProps } = useStageParameters('mark-duplicates')
   const { rootDir, selectedPatient: selectedFolder, setSelectedPatient: setSelectedFolder } = useRootDir()
   const [inputBam, setInputBam] = useState('')
   const [indexBamPath, setIndexBamPath] = useState('')
@@ -139,14 +142,14 @@ export function PostAlignmentPanel() {
   }
 
   const markDupPreview = useMemo(() => {
-    const i = inputBam.trim()
-    const o = getOutputBamPreview()
-    const m = getMetricsPreview()
-    if (!i || !o || !m) {
-      return '/usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ~/picard.jar MarkDuplicates I=~/aligned_sorted.bam O=~/dedup.bam M=~/dup_metrics.txt'
-    }
-    return `/usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ~/picard.jar MarkDuplicates I=${i} O=${o} M=${m}`
-  }, [inputBam, getOutputBamPreview, getMetricsPreview])
+    const i = inputBam.trim() || '~/aligned_sorted.bam'
+    const o = getOutputBamPreview() || '~/dedup.bam'
+    const m = getMetricsPreview() || '~/dup_metrics.txt'
+    return [
+      `/usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ~/picard.jar MarkDuplicates I=${i} O=${o} M=${m}`,
+      ...(args?.main ?? []),
+    ].join(' ')
+  }, [inputBam, getOutputBamPreview, getMetricsPreview, args])
 
   const indexCmdPreview = useMemo(() => {
     const b = indexBamPath.trim() || getOutputBamPreview()
@@ -175,6 +178,7 @@ export function PostAlignmentPanel() {
         body: JSON.stringify({
           inputBam: i,
           patientDir,
+          parameters,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -190,7 +194,7 @@ export function PostAlignmentPanel() {
     } finally {
       setMdLoading(false)
     }
-  }, [inputBam, getPatientDir])
+  }, [inputBam, getPatientDir, parameters])
 
   const runIndexBam = useCallback(async () => {
     const bam = indexBamPath.trim() || getOutputBamPreview()
@@ -222,7 +226,7 @@ export function PostAlignmentPanel() {
     if (o) setIndexBamPath(o)
   }, [getOutputBamPreview])
 
-  const canRunMd = Boolean(inputBam.trim() && selectedFolder) && !mdLoading
+  const canRunMd = Boolean(inputBam.trim() && selectedFolder && parameters) && !mdLoading
   const canRunIndex = Boolean((indexBamPath.trim() || getOutputBamPreview()) && !indexLoading)
 
   return (
@@ -383,7 +387,8 @@ PICARD_JAR=~/picard.jar`}
           />
         </div>
 
-        <pre className="qc-cmd align-pre">{markDupPreview}</pre>
+        <StageParameters {...fieldProps} disabled={mdLoading} />
+        {args && <pre className="qc-cmd align-pre">{markDupPreview}</pre>}
 
         <div className="qc-actions align-actions-row">
           <button type="button" className="qc-run" onClick={runMarkDuplicates} disabled={!canRunMd}>
@@ -393,7 +398,7 @@ PICARD_JAR=~/picard.jar`}
             type="button"
             className="qc-run"
             onClick={() => copyToClipboard(markDupPreview, setCopied)}
-            disabled={mdLoading}
+            disabled={mdLoading || !parameters}
           >
             Copy command
           </button>

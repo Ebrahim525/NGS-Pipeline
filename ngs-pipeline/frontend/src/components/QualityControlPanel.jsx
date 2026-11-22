@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useRootDir } from '../RootDirContext.jsx'
 import { FilePickerModal } from './FilePickerModal.jsx'
+import { StageParameters } from './StageParameters.jsx'
+import { useStageParameters } from './useStageParameters.js'
 
 export function QualityControlPanel() {
+  const { parameters, args, fieldProps } = useStageParameters('fastqc')
   const { rootDir, selectedPatient: selectedFolder, setSelectedPatient: setSelectedFolder } = useRootDir()
   const [inputPaths, setInputPaths] = useState([''])
   const [loading, setLoading] = useState(false)
@@ -123,7 +126,7 @@ export function QualityControlPanel() {
       const res = await fetch('/api/qc/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputPaths: paths, patientDir }),
+        body: JSON.stringify({ inputPaths: paths, patientDir, parameters }),
       })
 
       const text = await res.text()
@@ -138,7 +141,7 @@ export function QualityControlPanel() {
     } finally {
       setLoading(false)
     }
-  }, [inputPaths, getPatientDir])
+  }, [inputPaths, getPatientDir, parameters])
 
   return (
     <div className="qc-panel">
@@ -261,12 +264,14 @@ export function QualityControlPanel() {
         />
       </div>
 
+      <StageParameters {...fieldProps} disabled={loading} />
+      {args && <pre className="qc-cmd">FastQC JVM option: {args.main.join(' ')}</pre>}
       <div className="qc-actions">
         <button
           type="button"
           className="qc-run"
           onClick={runQc}
-          disabled={loading || browsing || !selectedFolder || !inputPaths.some((p) => p.trim())}
+          disabled={loading || browsing || !parameters || !selectedFolder || !inputPaths.some((p) => p.trim())}
         >
           {loading ? 'Running FastQC…' : 'Run FastQC'}
         </button>

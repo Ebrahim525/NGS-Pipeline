@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRootDir } from '../RootDirContext.jsx'
+import { StageParameters } from './StageParameters.jsx'
+import { useStageParameters } from './useStageParameters.js'
 
 /** With conda run, `vep` on that env’s PATH is enough */
 const defaultVepCmd = 'vep'
@@ -30,15 +32,16 @@ function toWslPath(winPath) {
 }
 
 export function VariantAnnotationPanel() {
+  const { parameters, args, fieldProps } = useStageParameters('vep')
   const { rootDir, selectedPatient: selectedFolder, setSelectedPatient: setSelectedFolder } = useRootDir()
   const [vepCmd, setVepCmd] = useState(defaultVepCmd)
   const [vepCondaEnv, setVepCondaEnv] = useState('vep_env')
   const [inputVcf, setInputVcf] = useState('')
   const [outputVcf, setOutputVcf] = useState('')
   const [fastaPath, setFastaPath] = useState('')
-  const [fork, setFork] = useState('4')
 
   const [runLoading, setRunLoading] = useState(false)
+  const [runError, setRunError] = useState(null)
   const [copied, setCopied] = useState(false)
 
   const [folders, setFolders] = useState([])
@@ -134,27 +137,17 @@ export function VariantAnnotationPanel() {
   const vepPreview = useMemo(() => {
     const v = vepCmd.trim() || defaultVepCmd
     const env = vepCondaEnv.trim()
-    const i = inputVcf.trim()
-    const o = outputVcf.trim()
-    const f = fastaPath.trim()
-    const fk = fork.trim() || '4'
-    const inner = !i || !o || !f
-      ? [
-          `${v} --cache --offline --fork ${fk} \\`,
-          '  -i ~/variants.vcf.gz \\',
-          '  -o ~/annotated_variants.vcf \\',
-          '  --vcf --symbol --terms SO --hgvs --protein --canonical \\',
-          '  --fasta ~/hg38.fa \\',
-          '  --force_overwrite',
-        ].join('\n')
-      : [
-          `${v} --cache --offline --fork ${fk} \\`,
-          `  -i ${i} \\`,
-          `  -o ${o} \\`,
-          '  --vcf --symbol --terms SO --hgvs --protein --canonical \\',
-          `  --fasta ${f} \\`,
-          '  --force_overwrite',
-        ].join('\n')
+    const i = inputVcf.trim() || '~/variants.vcf.gz'
+    const o = outputVcf.trim() || '~/annotated_variants.vcf'
+    const f = fastaPath.trim() || '~/hg38.fa'
+    const inner = [
+      [v, '--cache --offline', ...(args?.main ?? [])].join(' ') + ' \\',
+      `  -i ${i} \\`,
+      `  -o ${o} \\`,
+      '  --vcf --symbol --terms SO --hgvs --protein --canonical \\',
+      `  --fasta ${f} \\`,
+      '  --force_overwrite',
+    ].join('\n')
     if (!env) return inner
     const collapsed = inner
       .split('\n')
@@ -162,21 +155,18 @@ export function VariantAnnotationPanel() {
       .filter(Boolean)
       .join(' ')
     return `conda run -n ${env} --no-capture-output ${collapsed}`
-  }, [vepCmd, vepCondaEnv, inputVcf, outputVcf, fastaPath, fork])
+  }, [vepCmd, vepCondaEnv, inputVcf, outputVcf, fastaPath, args])
 
   const runVep = useCallback(async () => {
     const i = inputVcf.trim()
     const o = outputVcf.trim()
     const f = fastaPath.trim()
     const v = vepCmd.trim() || defaultVepCmd
-    const fk = fork.trim() ? Number.parseInt(fork.trim(), 10) : 4
-    if (!i || !o || !f) {
-      return
-    }
-    if (!Number.isInteger(fk) || fk < 1 || fk > 16) {
+    if (!i || !o || !f || !parameters) {
       return
     }
     setRunLoading(true)
+    setRunError(null)
     try {
       const res = await fetch('/api/variant-annotation/run', {
         method: 'POST',
@@ -187,7 +177,7 @@ export function VariantAnnotationPanel() {
           inputVcf: i,
           outputVcf: o,
           fastaPath: f,
-          fork: fk,
+          parameters,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -196,15 +186,15 @@ export function VariantAnnotationPanel() {
           data.detail ? `${data.error || 'Error'}: ${data.detail}` : data.error || res.statusText,
         )
       }
-    } catch {
-      // Suppress UI output/error boxes for this step.
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : String(error))
     } finally {
       setRunLoading(false)
     }
-  }, [vepCmd, vepCondaEnv, inputVcf, outputVcf, fastaPath, fork])
+  }, [vepCmd, vepCondaEnv, inputVcf, outputVcf, fastaPath, parameters])
 
   const canRun =
-    Boolean(inputVcf.trim() && outputVcf.trim() && fastaPath.trim()) && !runLoading
+    Boolean(inputVcf.trim() && outputVcf.trim() && fastaPath.trim() && parameters) && !runLoading
 
   return (
     <div className="qc-panel align-panel">
@@ -415,22 +405,9 @@ export function VariantAnnotationPanel() {
           />
         </div>
 
-        <div className="qc-field">
-          <label htmlFor="va-fork">Parallel forks (--fork)</label>
-          <input
-            id="va-fork"
-            type="text"
-            className="qc-input"
-            placeholder="4"
-            value={fork}
-            onChange={(e) => setFork(e.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-            disabled={runLoading}
-          />
-        </div>
-
-        <pre className="qc-cmd align-pre">{vepPreview}</pre>
+        <StageParameters {...fieldProps} disabled={runLoading} />
+        {args && <pre className="qc-cmd align-pre">{vepPreview}</pre>}
+        {runError && <div className="qc-error" role="alert">{runError}</div>}
 
         <div className="qc-actions align-actions-row">
           <button type="button" className="qc-run" onClick={runVep} disabled={!canRun}>
@@ -440,7 +417,7 @@ export function VariantAnnotationPanel() {
             type="button"
             className="qc-run"
             onClick={() => copyToClipboard(vepPreview, setCopied)}
-            disabled={runLoading}
+            disabled={runLoading || !parameters}
           >
             Copy command
           </button>

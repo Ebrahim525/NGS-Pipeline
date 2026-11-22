@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRootDir } from '../RootDirContext.jsx'
+import { StageParameters } from './StageParameters.jsx'
+import { useStageParameters } from './useStageParameters.js'
 
 /** Shown in prerequisite copy blocks; server uses PICARD_JAVA from backend/.env */
 const JAVA_PREVIEW = '/usr/lib/jvm/java-17-openjdk-amd64/bin/java'
@@ -28,9 +30,11 @@ const PREREQ_DICT = `${JAVA_PREVIEW} -jar ${defaultGatkJar} CreateSequenceDictio
   -R ~/hg38.fa \\
   -O ~/hg38.dict`
 
-const RG_DEFAULTS = { rgid: '1', rglb: 'lib1', rgpl: 'ILLUMINA', rgpu: 'unit1', rgsm: 'sample1' }
-
 export function VariantCallingPanel() {
+  const readGroups = useStageParameters('read-groups')
+  const haplotype = useStageParameters('haplotype-caller')
+  const { parameters: rgParameters, args: rgArgs } = readGroups
+  const { parameters: hcParameters, args: hcArgs } = haplotype
   const { rootDir, selectedPatient: selectedFolder, setSelectedPatient: setSelectedFolder } = useRootDir()
   const [gatkJar, setGatkJar] = useState(defaultGatkJar)
   const [refPath, setRefPath] = useState('')
@@ -38,6 +42,7 @@ export function VariantCallingPanel() {
   const [outputVcf, setOutputVcf] = useState('')
 
   const [runLoading, setRunLoading] = useState(false);
+  const [runError, setRunError] = useState(null)
   const [copied, setCopied] = useState(false);
   const [prepareRefLoading, setPrepareRefLoading] = useState(false);
   const [prepareRefError, setPrepareRefError] = useState(null);
@@ -172,9 +177,9 @@ export function VariantCallingPanel() {
       'java -jar ~/ngs-pipeline/picard.jar AddOrReplaceReadGroups \\',
       `  I=${i} \\`,
       `  O=${o} \\`,
-      `  RGID=${RG_DEFAULTS.rgid} RGLB=${RG_DEFAULTS.rglb} RGPL=${RG_DEFAULTS.rgpl} RGPU=${RG_DEFAULTS.rgpu} RGSM=${RG_DEFAULTS.rgsm}`,
+      `  ${rgArgs?.main.join(' ') ?? ''}`,
     ].join('\n')
-  }, [getDedupBamPreview, rgBam, getRgBamPreview])
+  }, [getDedupBamPreview, rgBam, getRgBamPreview, rgArgs])
 
   const indexRgCmdPreview = useMemo(() => {
     const b = rgBam.trim() || getRgBamPreview() || '~/dedup_rg.bam'
@@ -195,7 +200,7 @@ export function VariantCallingPanel() {
       const res = await fetch('/api/variant-calling/add-read-groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputBam: i, patientDir, ...RG_DEFAULTS }),
+        body: JSON.stringify({ inputBam: i, patientDir, parameters: rgParameters }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -213,7 +218,7 @@ export function VariantCallingPanel() {
     } finally {
       setRgLoading(false)
     }
-  }, [getDedupBamPreview, getPatientDir])
+  }, [getDedupBamPreview, getPatientDir, rgParameters])
 
   const runIndexRgBam = useCallback(async () => {
     const bam = rgBam.trim() || getRgBamPreview()
@@ -240,29 +245,22 @@ export function VariantCallingPanel() {
     }
   }, [rgBam, getRgBamPreview])
 
-  const canRunAddReadGroups = Boolean(selectedFolder && getDedupBamPreview()) && !rgLoading
+  const canRunAddReadGroups = Boolean(selectedFolder && getDedupBamPreview() && rgParameters) && !rgLoading
   const canRunIndexRg = Boolean((rgBam.trim() || getRgBamPreview()) && !rgIndexLoading)
 
   const hcPreview = useMemo(() => {
     const jar = gatkJar.trim() || defaultGatkJar
-    const r = refPath.trim()
-    const i = inputBam.trim()
-    const o = outputVcf.trim()
-    if (!r || !i || !o) {
-      return [
-        `${JAVA_PREVIEW} -jar ${jar} HaplotypeCaller \\`,
-        '  -R ~/hg38.fa \\',
-        '  -I ~/dedup_rg.bam \\',
-        '  -O ~/variants1.vcf.gz',
-      ].join('\n')
-    }
+    const r = refPath.trim() || '~/hg38.fa'
+    const i = inputBam.trim() || '~/dedup_rg.bam'
+    const o = outputVcf.trim() || '~/variants1.vcf.gz'
+    const options = hcArgs?.main ?? []
     return [
       `${JAVA_PREVIEW} -jar ${jar} HaplotypeCaller \\`,
       `  -R ${r} \\`,
       `  -I ${i} \\`,
-      `  -O ${o}`,
+      `  -O ${o}${options.length ? ` ${options.join(' ')}` : ''}`,
     ].join('\n')
-  }, [gatkJar, refPath, inputBam, outputVcf])
+  }, [gatkJar, refPath, inputBam, outputVcf, hcArgs])
 
   const runHaplotypeCaller = useCallback(async () => {
     const r = refPath.trim()
@@ -273,6 +271,7 @@ export function VariantCallingPanel() {
       return
     }
     setRunLoading(true)
+    setRunError(null)
     try {
       const res = await fetch('/api/variant-calling/haplotype-caller', {
         method: 'POST',
@@ -282,6 +281,7 @@ export function VariantCallingPanel() {
           refPath: r,
           inputBam: i,
           outputVcf: o,
+          parameters: hcParameters,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -290,12 +290,12 @@ export function VariantCallingPanel() {
           data.detail ? `${data.error || 'Error'}: ${data.detail}` : data.error || res.statusText,
         )
       }
-    } catch {
-      // Suppress UI output/error boxes for this step.
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : String(error))
     } finally {
       setRunLoading(false)
     }
-  }, [gatkJar, refPath, inputBam, outputVcf])
+  }, [gatkJar, refPath, inputBam, outputVcf, hcParameters])
 
   const runPrepareReference = useCallback(async () => {
     setPrepareRefLoading(true);
@@ -464,7 +464,8 @@ export function VariantCallingPanel() {
           />
         </div>
 
-        <pre className="qc-cmd align-pre">{rgCmdPreview}</pre>
+        <StageParameters {...readGroups.fieldProps} disabled={rgLoading} />
+        {rgArgs && <pre className="qc-cmd align-pre">{rgCmdPreview}</pre>}
         <div className="qc-actions align-actions-row">
           <button
             type="button"
@@ -478,7 +479,7 @@ export function VariantCallingPanel() {
             type="button"
             className="qc-run"
             onClick={() => copyToClipboard(rgCmdPreview, setCopied)}
-            disabled={rgLoading}
+            disabled={rgLoading || !rgParameters}
           >
             Copy command
           </button>
@@ -592,17 +593,19 @@ export function VariantCallingPanel() {
           />
         </div>
 
-        <pre className="qc-cmd align-pre">{hcPreview}</pre>
+        <StageParameters {...haplotype.fieldProps} disabled={runLoading} />
+        {hcArgs && <pre className="qc-cmd align-pre">{hcPreview}</pre>}
+        {runError && <div className="qc-error" role="alert">{runError}</div>}
 
         <div className="qc-actions align-actions-row">
-          <button type="button" className="qc-run" onClick={runHaplotypeCaller} disabled={!canRun}>
+          <button type="button" className="qc-run" onClick={runHaplotypeCaller} disabled={!canRun || !hcParameters}>
             {runLoading ? 'Running HaplotypeCaller…' : 'Run HaplotypeCaller'}
           </button>
           <button
             type="button"
             className="qc-run"
             onClick={() => copyToClipboard(hcPreview, setCopied)}
-            disabled={runLoading}
+            disabled={runLoading || !hcParameters}
           >
             Copy command
           </button>

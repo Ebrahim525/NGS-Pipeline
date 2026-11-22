@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRootDir } from '../RootDirContext.jsx'
 import { FilePickerModal } from './FilePickerModal.jsx'
+import { StageParameters } from './StageParameters.jsx'
+import { useStageParameters } from './useStageParameters.js'
 
 export function ReadTrimmingPanel() {
+  const { parameters, args, fieldProps } = useStageParameters('bbduk')
   const { rootDir, selectedPatient: selectedFolder, setSelectedPatient: setSelectedFolder } = useRootDir()
   const [inputPath, setInputPath] = useState('')
   const [ref, setRef] = useState('adapters')
-  const [customCommand, setCustomCommand] = useState('')
-  const [commandEdited, setCommandEdited] = useState(false)
   const [loading, setLoading] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [showFileModal, setShowFileModal] = useState(false)
@@ -114,19 +115,14 @@ export function ReadTrimmingPanel() {
     const out = toFwd(getOutputPreviewPath()) || '/path/to/patient/trimming/cleaned_sample.fastq'
     const r = ref.trim() || 'adapters'
     return [
-      './bbduk.sh \\',
-      `  in="${inn}" \\`,
-      `  out="${out}" \\`,
-      `  ref=${r} \\`,
-      '  ktrim=r \\',
-      '  k=23 \\',
-      '  mink=11 \\',
-      '  hdist=1 \\',
-      '  qtrim=r \\',
-      '  trimq=20 \\',
-      '  minlen=30',
-    ].join('\n')
-  }, [inputPath, getOutputPreviewPath, ref])
+      './bbduk.sh',
+      `  in="${inn}"`,
+      `  out="${out}"`,
+      `  ref=${r}`,
+      '  ktrim=r qtrim=r',
+      ...(args?.main ?? []).map((arg) => `  ${arg}`),
+    ].join(' \\\n')
+  }, [inputPath, getOutputPreviewPath, ref, args])
 
   const runTrim = useCallback(async () => {
     setError(null)
@@ -144,18 +140,7 @@ export function ReadTrimmingPanel() {
     }
     setLoading(true)
     try {
-      // previewCmd is illustrative only; only override the API's own auto-built command
-      // when the user has actually edited it.
-      const body = { inputPath: inn, patientDir, ref: ref.trim() || 'adapters' }
-      if (commandEdited) {
-        const finalCommand = customCommand.trim()
-        if (!finalCommand) {
-          setError('Enter a BBDuk shell command to run.')
-          setLoading(false)
-          return
-        }
-        body.command = finalCommand
-      }
+      const body = { inputPath: inn, patientDir, ref: ref.trim() || 'adapters', parameters }
       const res = await fetch('/api/trimming/bbduk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -175,7 +160,7 @@ export function ReadTrimmingPanel() {
     } finally {
       setLoading(false)
     }
-  }, [commandEdited, customCommand, inputPath, ref, getPatientDir])
+  }, [inputPath, ref, getPatientDir, parameters])
 
   return (
     <div className="qc-panel">
@@ -312,12 +297,14 @@ export function ReadTrimmingPanel() {
         </p>
       </div>
 
+      <StageParameters {...fieldProps} disabled={loading} />
+      {args && <pre className="qc-cmd align-pre">{previewCmd}</pre>}
       <div className="qc-actions">
         <button
           type="button"
           className="qc-run"
           onClick={runTrim}
-          disabled={loading || browsing || !selectedFolder || !inputPath.trim()}
+          disabled={loading || browsing || !parameters || !selectedFolder || !inputPath.trim()}
         >
           {loading ? 'Running BBDuk…' : 'Run BBDuk'}
         </button>
@@ -344,22 +331,6 @@ export function ReadTrimmingPanel() {
       {error && <div className="qc-error">{error}</div>}
 
       <section className="qc-server-help">
-        <h3 className="qc-help-title">shell command</h3>
-        <p className="qc-hint">
-          Illustrative only. Leave this untouched and <strong>Run BBDuk</strong> uses the API&apos;s own
-          auto-built command instead.
-        </p>
-        <textarea
-          className="qc-input align-textarea"
-          value={commandEdited ? customCommand : previewCmd}
-          onChange={(e) => {
-            setCommandEdited(true)
-            setCustomCommand(e.target.value)
-          }}
-          disabled={loading}
-          spellCheck={false}
-          rows={8}
-        />
         <h3 className="qc-help-title">BBduk setup</h3>
         <ol className="qc-help-list">
           <li>

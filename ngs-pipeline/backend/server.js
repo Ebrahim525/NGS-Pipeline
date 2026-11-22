@@ -8,6 +8,10 @@ import fsPromises from 'fs/promises'
 import os from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { resolveStageParameters, STAGE_PARAMETERS } from '../shared/stageParameters.js'
+import { registerStageRunRoutes } from './stage-runs.js'
+import { runsFolder } from './stage-artifacts.js'
+import { sanitizeFolderName } from './patient-folders.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.join(__dirname, '.env') })
@@ -62,7 +66,7 @@ function buildClasspath(fastqcDir) {
   return [fastqcDir, 'bin', 'sam-1.103.jar', 'jbzip2-0.9.jar'].join(sep)
 }
 
-function runFastqc({ fastqcDir, inputPaths, outDir }) {
+function runFastqc({ fastqcDir, inputPaths, outDir, threads, parameterArgs }) {
   console.log("fastqcDir")
   console.log(fastqcDir)
   const cwd = path.resolve(fastqcDir)
@@ -72,9 +76,13 @@ function runFastqc({ fastqcDir, inputPaths, outDir }) {
   console.log("classpath")
   console.log(classpath)
   const mem = process.env.FASTQC_JAVA_MEM || '250m'
+  const heap = /^(\d+)([kmg]?)$/i.exec(mem)
+  const workers = Math.min(threads, inputPaths.length)
+  const maxHeap = heap && workers > 1 ? `${Number(heap[1]) * workers}${heap[2]}` : mem
   // Input file(s) must come before -o / --outdir; otherwise FastQC treats the output path as a sequence file.
   const args = [
-    `-Xmx${mem}`,
+    `-Xmx${maxHeap}`,
+    ...parameterArgs,
     '-classpath',
     classpath,
     'uk.ac.babraham.FastQC.FastQCApplication',
@@ -353,7 +361,7 @@ function assertSafeBwaCmd(cmd) {
 }
 
 /** HaplotypeCaller via `java -jar gatk-package-*-local.jar` (same Java as PICARD_JAVA / .env). */
-function gatkHaplotypeCallerCommand(refPath, inputBam, outputVcf, reqBody) {
+function gatkHaplotypeCallerCommand(refPath, inputBam, outputVcf, reqBody, parameterArgs) {
   const w = bashWslWord
   const jar =
     reqBody?.gatkJar?.trim() ||
@@ -371,7 +379,7 @@ function gatkHaplotypeCallerCommand(refPath, inputBam, outputVcf, reqBody) {
   }
   const javaBin = picardJavaExecutable()
   const optsPart = jopts ? `${jopts} ` : ''
-  return `${javaBin} ${optsPart}-jar ${w(jar)} HaplotypeCaller -R ${w(refPath)} -I ${w(inputBam)} -O ${w(outputVcf)}`
+  return [`${javaBin} ${optsPart}-jar ${w(jar)} HaplotypeCaller -R ${w(refPath)} -I ${w(inputBam)} -O ${w(outputVcf)}`, ...parameterArgs.map(bashSingleQuote)].join(' ')
 }
 
 function assertSafeVepCmd(cmd) {
@@ -449,11 +457,10 @@ function pythonExecutable() {
  * Ensembl VEP: --cache --offline. Optionally wrap with `conda run -n env --no-capture-output` so
  * Perl sees the env’s modules (fixes missing DBI when activation from bash -ilc is incomplete).
  */
-function vepAnnotationCommand(inputVcf, outputVcf, fastaPath, fork, reqBody) {
+function vepAnnotationCommand(inputVcf, outputVcf, fastaPath, reqBody, parameterArgs) {
   const w = bashWslWord
   const vep = vepExecutableFromRequest(reqBody)
-  const f = vepForkCount(fork)
-  const inner = `${w(vep)} --cache --offline --fork ${f} -i ${w(inputVcf)} -o ${w(outputVcf)} --vcf --symbol --terms SO --hgvs --protein --canonical --fasta ${w(fastaPath)} --force_overwrite`
+  const inner = `${w(vep)} --cache --offline ${parameterArgs.join(' ')} -i ${w(inputVcf)} -o ${w(outputVcf)} --vcf --symbol --terms SO --hgvs --protein --canonical --fasta ${w(fastaPath)} --force_overwrite`
 
   const condaEnv = vepCondaEnvFromRequest(reqBody)
   if (condaEnv) {
@@ -526,8 +533,9 @@ function picardJavaExecutable() {
  * When PICARD_JAR is set: `${PICARD_JAVA} [PICARD_JAVA_OPTS] -jar jar MarkDuplicates …`
  * Matches e.g. `/usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ~/picard.jar MarkDuplicates I=…`
  */
-function picardMarkDuplicatesCommand(inputBam, outputBam, metricsPath) {
+function picardMarkDuplicatesCommand(inputBam, outputBam, metricsPath, parameterArgs) {
   const w = bashWslWord
+  const args = [`I=${w(inputBam)}`, `O=${w(outputBam)}`, `M=${w(metricsPath)}`, ...parameterArgs].join(' ')
   const jar = process.env.PICARD_JAR?.trim()
   if (jar) {
     assertSafePath('PICARD_JAR', jar)
@@ -544,10 +552,10 @@ function picardMarkDuplicatesCommand(inputBam, outputBam, metricsPath) {
     }
     const javaBin = picardJavaExecutable()
     const optsPart = jopts ? `${jopts} ` : ''
-    return `${javaBin} ${optsPart}-jar ${w(jar)} MarkDuplicates I=${w(inputBam)} O=${w(outputBam)} M=${w(metricsPath)}`
+    return `${javaBin} ${optsPart}-jar ${w(jar)} MarkDuplicates ${args}`
   }
   const picardBin = picardExecutable()
-  return `${picardBin} MarkDuplicates I=${w(inputBam)} O=${w(outputBam)} M=${w(metricsPath)}`
+  return `${picardBin} MarkDuplicates ${args}`
 }
 
 function useWslForAlignment() {
@@ -623,6 +631,27 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true })
 })
 
+function validatedParameters(stage, overrides) {
+  try {
+    return resolveStageParameters(stage, overrides)
+  } catch (error) {
+    error.status = 400
+    throw error
+  }
+}
+
+app.get('/api/stage-parameters', (_req, res) => {
+  res.json(STAGE_PARAMETERS)
+})
+
+app.post('/api/stage-parameters/:stage/preview', (req, res) => {
+  try {
+    res.json(validatedParameters(req.params.stage, req.body?.parameters))
+  } catch (error) {
+    res.status(400).json({ error: error.message })
+  }
+})
+
 app.post('/api/alignment/index-ref', async (req, res) => {
   try {
     const bwaCmd = assertSafeBwaCmd(req.body?.bwaCmd)
@@ -648,6 +677,7 @@ app.post('/api/alignment/index-ref', async (req, res) => {
 
 app.post('/api/alignment/run', async (req, res) => {
   try {
+    const { args } = validatedParameters('alignment', req.body?.parameters)
     const bwaCmd = assertSafeBwaCmd(req.body?.bwaCmd)
     const refPathRaw = req.body?.refPath?.trim() || '/home/ngs/hg38.fa'
     const refPath = assertSafePath('refPath', refPathRaw)
@@ -678,7 +708,7 @@ app.post('/api/alignment/run', async (req, res) => {
     const outBamPath = toGitBashPath(outBamWin)
 
     const w = bashWslWord
-    const pipeline = `${w(bwaCmd)} mem ${w(refPath)} ${w(fastqPath)} | samtools view -Sb - | samtools sort -o ${w(outBamPath)}`
+    const pipeline = `${w(bwaCmd)} mem ${args.bwa.join(' ')} ${w(refPath)} ${w(fastqPath)} | samtools view -Sb - | samtools sort ${args.sort.join(' ')} -o ${w(outBamPath)}`
     const script = wrapWithPrologue(pipeline)
 
     const { stdout, stderr } = await runBashScript(script)
@@ -717,6 +747,7 @@ app.post('/api/alignment/index-bam', async (req, res) => {
 
 app.post('/api/post-alignment/mark-duplicates', async (req, res) => {
   try {
+    const { args } = validatedParameters('mark-duplicates', req.body?.parameters)
     const inputBam = assertSafePath('inputBam', req.body?.inputBam)
 
     const patientDirRaw = req.body?.patientDir
@@ -743,7 +774,7 @@ app.post('/api/post-alignment/mark-duplicates', async (req, res) => {
     const outputBam = toGitBashPath(path.join(postAlignDir, 'dedup.bam'))
     const metricsPath = toGitBashPath(path.join(postAlignDir, 'dup_metrics.txt'))
 
-    const pipeline = picardMarkDuplicatesCommand(inputBam, outputBam, metricsPath)
+    const pipeline = picardMarkDuplicatesCommand(inputBam, outputBam, metricsPath, args.main)
     const script = wrapWithPrologue(pipeline)
 
     const { stdout, stderr } = await runBashScript(script)
@@ -761,20 +792,18 @@ app.post('/api/post-alignment/mark-duplicates', async (req, res) => {
 
 app.post('/api/variant-calling/prepare-reference', async (req, res) => {
   try {
-    const refPath = assertSafePath('refPath', req.body?.refPath);
+    const refPath = assertSafePath('refPath', req.body?.refPath)
     const jar = req.body?.gatkJar?.trim() ||
       process.env.GATK_JAR?.trim() ||
-      '~/ngs-pipeline/gatk-4.5.0.0/gatk-package-4.5.0.0-local.jar';
-    // Validate jar path
-    assertSafePath('gatkJar', jar);
-    const resolvedRef = path.resolve(refPath);
-    await fsPromises.access(resolvedRef, fs.constants.R_OK);
-    // Commands
-    const faidxCmd = `samtools faidx ${bashSingleQuote(toWinForwardSlashPath(resolvedRef))}`;
-    const dictCmd = `${bashSingleQuote(JAVA_PREVIEW)} -jar ${bashSingleQuote(toWinForwardSlashPath(jar))} CreateSequenceDictionary -R ${bashSingleQuote(toWinForwardSlashPath(resolvedRef))} -O ${bashSingleQuote(toWinForwardSlashPath(`${resolvedRef}.dict`))}`;
-    const script = trimScriptBody(`cd ${bashSingleQuote(toWinForwardSlashPath(path.dirname(resolvedRef)))} && ${faidxCmd} && ${dictCmd}`);
-    const { stdout, stderr } = await runBashScript(script);
-    res.json({ ok: true, stdout, stderr, commands: { faidx: faidxCmd, dict: dictCmd } });
+      '~/ngs-pipeline/gatk-4.5.0.0/gatk-package-4.5.0.0-local.jar'
+    assertSafePath('gatkJar', jar)
+    const reference = refPath.replace(/\\/g, '/')
+    const dictionary = reference.replace(/\.(?:fa|fasta|fna)$/i, '') + '.dict'
+    const w = bashWslWord
+    const faidxCmd = `samtools faidx ${w(reference)}`
+    const dictCmd = `${picardJavaExecutable()} -jar ${w(jar.replace(/\\/g, '/'))} CreateSequenceDictionary -R ${w(reference)} -O ${w(dictionary)}`
+    const { stdout, stderr } = await runBashScript(wrapWithPrologue(`${faidxCmd}\n${dictCmd}`))
+    res.json({ ok: true, stdout, stderr, commands: { faidx: faidxCmd, dict: dictCmd } })
   } catch (e) {
     if (e && typeof e.status === 'number') {
       return res.status(e.status).json({ error: e.message });
@@ -786,6 +815,13 @@ app.post('/api/variant-calling/prepare-reference', async (req, res) => {
 app.post('/api/variant-calling/add-read-groups', async (req, res) => {
   try {
     const inputBam = assertSafePath('inputBam', req.body?.inputBam)
+    const readGroupFields = STAGE_PARAMETERS['read-groups']
+    const legacyParameters = () => Object.fromEntries(Object.keys(readGroupFields).map((key) => {
+      const value = String(req.body?.[key] ?? readGroupFields[key].default).replace(/[^a-zA-Z0-9._-]/g, '')
+      return [key, value]
+    }))
+    const overrides = req.body?.parameters === undefined ? legacyParameters() : req.body.parameters
+    const { args } = validatedParameters('read-groups', overrides)
 
     const patientDirRaw = req.body?.patientDir
     const patientDirNorm = typeof patientDirRaw === 'string' ? patientDirRaw.replace(/\\/g, '/') : patientDirRaw
@@ -807,11 +843,6 @@ app.post('/api/variant-calling/add-read-groups', async (req, res) => {
       return res.status(500).json({ error: `Could not create output folder: ${vcDir}`, detail: e.message })
     }
     const outputBam = toGitBashPath(path.join(vcDir, 'dedup_rg.bam'))
-    const rgid = String(req.body?.rgid ?? '1').replace(/[^a-zA-Z0-9._-]/g, '')
-    const rglb = String(req.body?.rglb ?? 'lib1').replace(/[^a-zA-Z0-9._-]/g, '')
-    const rgpl = String(req.body?.rgpl ?? 'ILLUMINA').replace(/[^a-zA-Z0-9._-]/g, '')
-    const rgpu = String(req.body?.rgpu ?? 'unit1').replace(/[^a-zA-Z0-9._-]/g, '')
-    const rgsm = String(req.body?.rgsm ?? 'sample1').replace(/[^a-zA-Z0-9._-]/g, '')
 
     const jar = process.env.PICARD_JAR?.trim() || '~/ngs-pipeline/picard.jar'
     assertSafePath('PICARD_JAR', jar)
@@ -827,7 +858,7 @@ app.post('/api/variant-calling/add-read-groups', async (req, res) => {
     const javaBin = picardJavaExecutable()
     const optsPart = jopts ? `${jopts} ` : ''
     const w = bashWslWord
-    const pipeline = `${javaBin} ${optsPart}-jar ${w(jar)} AddOrReplaceReadGroups I=${w(inputBam)} O=${w(outputBam)} RGID=${rgid} RGLB=${rglb} RGPL=${rgpl} RGPU=${rgpu} RGSM=${rgsm}`
+    const pipeline = `${javaBin} ${optsPart}-jar ${w(jar)} AddOrReplaceReadGroups I=${w(inputBam)} O=${w(outputBam)} ${args.main.join(' ')}`
     const script = wrapWithPrologue(pipeline)
 
     const { stdout, stderr } = await runBashScript(script)
@@ -845,11 +876,12 @@ app.post('/api/variant-calling/add-read-groups', async (req, res) => {
 
 app.post('/api/variant-calling/haplotype-caller', async (req, res) => {
   try {
+    const { args } = validatedParameters('haplotype-caller', req.body?.parameters)
     const refPath = assertSafePath('refPath', req.body?.refPath)
     const inputBam = assertSafePath('inputBam', req.body?.inputBam)
     const outputVcf = assertSafePath('outputVcf', req.body?.outputVcf)
 
-    const pipeline = gatkHaplotypeCallerCommand(refPath, inputBam, outputVcf, req.body)
+    const pipeline = gatkHaplotypeCallerCommand(refPath, inputBam, outputVcf, req.body, args.main ?? [])
     const script = wrapWithPrologue(pipeline)
 
     const { stdout, stderr } = await runBashScript(script)
@@ -867,11 +899,13 @@ app.post('/api/variant-calling/haplotype-caller', async (req, res) => {
 
 app.post('/api/variant-annotation/run', async (req, res) => {
   try {
+    const overrides = req.body?.parameters === undefined ? { fork: vepForkCount(req.body?.fork) } : req.body.parameters
+    const { args } = validatedParameters('vep', overrides)
     const inputVcf = assertSafePath('inputVcf', req.body?.inputVcf)
     const outputVcf = assertSafePath('outputVcf', req.body?.outputVcf)
     const fastaPath = assertSafePath('fastaPath', req.body?.fastaPath)
 
-    const pipeline = vepAnnotationCommand(inputVcf, outputVcf, fastaPath, req.body?.fork, req.body)
+    const pipeline = vepAnnotationCommand(inputVcf, outputVcf, fastaPath, req.body, args.main)
     const script = wrapWithPrologue(pipeline)
 
     const { stdout, stderr } = await runBashScript(script)
@@ -912,6 +946,7 @@ app.post('/api/upload-vcf', express.text({ limit: '50mb', type: '*/*' }), async 
  */
 app.post('/api/downstream/civic-report', async (req, res) => {
   try {
+    const { args: parameterArgs } = validatedParameters('civic-report', req.body?.parameters)
     const bundledReportDir = path.join(__dirname, 'tools', 'civic_report')
     const reportDirRaw = process.env.CIVIC_REPORT_DIR?.trim()
     const scriptRaw = req.body?.scriptPath?.trim() || process.env.CIVIC_REPORT_SCRIPT?.trim()
@@ -980,7 +1015,7 @@ app.post('/api/downstream/civic-report', async (req, res) => {
       return res.status(400).json({ error: `Output folder is not writable: ${outputParent}` })
     }
 
-    const args = [scriptPath, resolvedInput, '--output', resolvedOutput]
+    const args = [scriptPath, resolvedInput, '--output', resolvedOutput, ...(parameterArgs.main ?? [])]
     const env = { ...process.env, CIVIC_CHROMA_DB_DIR: dbDir }
 
     const result = await new Promise((resolve, reject) => {
@@ -1017,7 +1052,7 @@ app.post('/api/downstream/civic-report', async (req, res) => {
       dbDir,
       inputVcf: resolvedInput,
       outputHtml: resolvedOutput,
-      command: `${pythonExecutable()} "${scriptPath}" "${resolvedInput}" --output "${resolvedOutput}"`,
+      command: `${pythonExecutable()} "${scriptPath}" "${resolvedInput}" --output "${resolvedOutput}"${args.length > 4 ? ` ${args.slice(4).join(' ')}` : ''}`,
     })
   } catch (e) {
     if (e && typeof e.status === 'number') {
@@ -1040,6 +1075,10 @@ app.post('/api/downstream/civic-report', async (req, res) => {
  */
 app.post('/api/trimming/bbduk', async (req, res) => {
   try {
+    const parameterArgs = req.body?.parameters === undefined ? null : validatedParameters('bbduk', req.body.parameters).args.main
+    if (parameterArgs && req.body?.command) {
+      return res.status(400).json({ error: 'Submit parameters or a command override separately.' })
+    }
     const bbmapDir = process.env.BBMAP_DIR?.trim()
     if (!bbmapDir) {
       return res.status(500).json({
@@ -1090,13 +1129,10 @@ app.post('/api/trimming/bbduk', async (req, res) => {
     const msysIn = toWinForwardSlashPath(resolvedIn)
     const msysOut = toWinForwardSlashPath(resolvedOut)
     const refTok = bbdukRefShellToken(req.body?.ref)
-    const k = parseTrimInt(req.body?.k, 23, 'k')
-    const mink = parseTrimInt(req.body?.mink, 11, 'mink')
-    const hdist = parseTrimInt(req.body?.hdist, 1, 'hdist')
-    const trimq = parseTrimInt(req.body?.trimq, 20, 'trimq')
-    const minlen = parseTrimInt(req.body?.minlen, 30, 'minlen')
-
-    const defaultLine = `./bbduk.sh in=${sq(msysIn)} out=${sq(msysOut)} ref=${refTok} ktrim=r k=${k} mink=${mink} hdist=${hdist} qtrim=r trimq=${trimq} minlen=${minlen}`
+    const trimArgs = parameterArgs ?? Object.entries(STAGE_PARAMETERS.bbduk).map(([key, field]) =>
+      `${key}=${parseTrimInt(req.body?.[key], field.default, key)}`,
+    )
+    const defaultLine = `./bbduk.sh in=${sq(msysIn)} out=${sq(msysOut)} ref=${refTok} ktrim=r qtrim=r ${trimArgs.join(' ')}`
     const commandFromUser = String(req.body?.command ?? '')
       .replace(/\\\r?\n\s*/g, ' ') // collapse backslash-newline continuations
       .replace(/\r?\n/g, ' ')       // collapse any remaining newlines
@@ -1420,24 +1456,6 @@ app.post('/api/setup/root-dir', async (req, res) => {
   }
 })
 
-/** Reject folder names that could escape the parent dir or hit reserved/invalid characters. */
-function sanitizeFolderName(name) {
-  const v = String(name ?? '').trim()
-  if (!v) {
-    const err = new Error('Folder name is required')
-    err.status = 400
-    throw err
-  }
-  if (v === '.' || v === '..' || /[\\/:*?"<>|\r\n\0]/.test(v)) {
-    const err = new Error('Folder name must not contain path separators or : * ? " < > |')
-    err.status = 400
-    throw err
-  }
-  // BBTools' bbduk.sh rebuilds its java command line via `eval`, which loses argument quoting
-  // and splits any path containing a space — so folder names must not contain whitespace.
-  return v.replace(/\s+/g, '_')
-}
-
 /** Immediate subdirectories of a given dir (e.g. per-patient folders under the ngs_data root). */
 app.get('/api/setup/subdirs', async (req, res) => {
   try {
@@ -1451,7 +1469,7 @@ app.get('/api/setup/subdirs', async (req, res) => {
       return res.json({ folders: [] })
     }
     const folders = entries
-      .filter((e) => e.isDirectory())
+      .filter((e) => e.isDirectory() && e.name !== runsFolder)
       .map((e) => e.name)
       .sort((a, b) => a.localeCompare(b))
     return res.json({ folders })
@@ -1501,6 +1519,12 @@ app.get('/api/setup/file-exists', async (req, res) => {
 })
 
 app.post('/api/qc/run', async (req, res) => {
+  let options
+  try {
+    options = validatedParameters('fastqc', req.body?.parameters)
+  } catch (error) {
+    return res.status(400).json({ error: error.message })
+  }
   const fastqcDir = process.env.FASTQC_DIR?.trim()
   if (!fastqcDir) {
     return res.status(500).json({
@@ -1576,6 +1600,8 @@ app.post('/api/qc/run', async (req, res) => {
       fastqcDir: resolvedFastqc,
       inputPaths: copiedInputs,
       outDir,
+      threads: options.parameters.threads,
+      parameterArgs: options.args.main,
     })
   } catch (e) {
     return res.status(500).json({
@@ -1619,6 +1645,11 @@ app.get('/api/qc/download-html', async (req, res) => {
   const stream = fs.createReadStream(filePath)
   stream.on('error', () => res.status(500).end())
   stream.pipe(res)
+})
+
+registerStageRunRoutes(app, {
+  port: PORT,
+  commandPath: (file) => useWslForAlignment() ? toGitBashPath(file) : file,
 })
 
 app.listen(PORT, () => {
